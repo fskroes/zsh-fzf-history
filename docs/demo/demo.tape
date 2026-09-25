@@ -1,4 +1,4 @@
-# Record the README demo:  vhs docs/demo/demo.tape   (run from the repo root)
+# Record the README demo:  bash docs/demo/record.sh demo   (run from the repo root)
 # Needs vhs, tmux and fzf 0.68+ (brew install vhs tmux fzf).
 # Uses a sandbox from docs/demo/setup.sh: made-up history, fake clipboard.
 
