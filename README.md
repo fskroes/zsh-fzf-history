@@ -1,6 +1,9 @@
 # zsh-fzf-history
 
 Fuzzy Ctrl-R history search for zsh on macOS, with [fzf](https://github.com/junegunn/fzf).
+
+![Ctrl-R fuzzy search, a command from another tab, Ctrl-Y copy and Shift-Tab multi-select](docs/demo/demo.gif)
+
 One small file on top of fzf's own key bindings. It adds three things:
 
 - **Ctrl-R sees your other open tabs.** When `share_history` is off, commands that you ran in
@@ -101,6 +104,16 @@ python3 tests/verify.py --zshrc ~/.zshrc   # your own config (it must source fzf
 ```
 
 If your Mac is slow and a check fails because of timing, run it with `ZFH_TEST_SLOW=2`.
+
+## Demo GIF
+
+The GIF above comes from [docs/demo/demo.tape](docs/demo/demo.tape). It uses a made-up history and
+a fake clipboard ([docs/demo/setup.sh](docs/demo/setup.sh)). To record it again after a change:
+
+```sh
+brew install vhs tmux
+vhs docs/demo/demo.tape    # from the repo root, writes docs/demo/demo.gif
+```
 
 ## Uninstall
 
