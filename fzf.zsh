@@ -1,7 +1,7 @@
 # zsh-fzf-history: fzf Ctrl-R history search for zsh (macOS), tuned.
 # Source this file from ~/.zshrc AFTER oh-my-zsh and your other plugins.
 #
-# Keys: Ctrl-R history, Ctrl-T file picker, Alt-C cd into a folder.
+# Keys: Ctrl-R history, Ctrl-T file picker, Left Option+C (Alt-C) cd into a folder.
 # In the Ctrl-R list: Enter inserts (does not run), Shift-Tab marks more,
 # Ctrl-R toggles sort, Ctrl-/ toggles line wrap, Ctrl-Y copies.
 # Docs: https://github.com/junegunn/fzf#key-bindings-for-command-line
