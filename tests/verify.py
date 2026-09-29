@@ -8,7 +8,7 @@ Usage:
 Safe: uses a made-up history file, a fake pbcopy and a temp dir, so your real
 history and clipboard are not touched. Slow Mac? Set ZFH_TEST_SLOW=2.
 """
-import os, pty, select, shutil, sys, tempfile, time
+import fcntl, os, pty, select, shutil, struct, sys, tempfile, termios, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FZF_ZSH = os.path.join(os.path.dirname(HERE), "fzf.zsh")
@@ -25,6 +25,7 @@ if not FZF:
 W = tempfile.mkdtemp(prefix="zsh-fzf-history-test.")
 HIST, BUF, CLIP = f"{W}/hist", f"{W}/buf.out", f"{W}/clip.out"
 COMP_DIR = f"{W}/comp/unique-dir-XYZ"
+T_NEW = int(time.time()) - 50  # time of "echo q-z-x-new" in the test history
 
 
 def setup(no_fzf=False):
@@ -40,6 +41,9 @@ def setup(no_fzf=False):
         f.write(f": {t+2}:0;printf 'BS-test a\\tb\\n'\n")        # literal backslashes
         f.write(f": {t+3}:0;echo TRAIL-test   \n")               # trailing spaces
         f.write(f": {t+4}:0;echo MULTI-a\n: {t+5}:0;echo MULTI-b\n")  # for multi-select
+        # File order is not time order, and the older command matches "qzx" better.
+        # fzf's own widget would show qzx-old first (higher event, better match).
+        f.write(f": {T_NEW}:0;echo q-z-x-new\n: {t+6}:0;echo qzx-old\n")
     with open(f"{W}/shim/pbcopy", "w") as f:
         f.write(f"#!/bin/sh\ncat > {CLIP}\n")
     os.chmod(f"{W}/shim/pbcopy", 0o755)
@@ -54,7 +58,7 @@ def setup(no_fzf=False):
     if USER_ZSHRC:
         body = f"export HISTFILE={HIST}\n{hide}source {USER_ZSHRC}\nexport HISTFILE={HIST}\n"
     else:
-        body = (f"HISTFILE={HIST}; HISTSIZE=1000; SAVEHIST=1000\n"
+        body = (f"HISTFILE={HIST}; HISTSIZE=30000; SAVEHIST=30000\n"
                 "setopt extended_history inc_append_history\nbindkey -e\n"
                 f"{hide}source {FZF_ZSH}\n")
     with open(f"{W}/zdot/.zshrc", "w") as f:
@@ -72,13 +76,18 @@ def setup(no_fzf=False):
 
 class Shell:
     def __init__(self):
-        env = dict(os.environ, ZDOTDIR=f"{W}/zdot", TERM="xterm-256color")
+        # A stale value, as an older fzf.zsh exported it: fzf.zsh must replace it,
+        # or the Ctrl-Y checks fail.
+        env = dict(os.environ, ZDOTDIR=f"{W}/zdot", TERM="xterm-256color",
+                   FZF_CTRL_R_OPTS="--bind 'ctrl-y:abort'")
         for k in list(env):
             if k.startswith("OTTY_"):
                 env.pop(k)
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.execvpe("zsh", ["zsh", "-i"], env)
+        # A real window size: in a 0x0 pty fzf draws no list lines.
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
         self.out = b""
         wait_file(f"{W}/ready", 30, self)  # first prompt drawn
         self.pump(0.5)
@@ -125,9 +134,9 @@ def wait_file(path, timeout, sh):
     return None
 
 
-def other_tab_writes(cmd):
+def other_tab_writes(cmd, when=None):
     with open(HIST, "a") as f:
-        f.write(f": {int(time.time())}:0;{cmd}\n")
+        f.write(f": {when or int(time.time())}:0;{cmd}\n")
 
 
 def ctrl_r_pick(sh, query):
@@ -184,6 +193,20 @@ for mark in (b"\x1b[Z", b"\t"):
 check("Shift-Tab / Tab in the list marks more than one command",
       buf is not None and sorted(buf.split("\n")) == ["echo MULTI-a", "echo MULTI-b"], repr(buf))
 
+# 3b. Sorted on time, newest first, also while you type; Ctrl-R in the list sorts by match
+start = len(sh.out)
+buf = ctrl_r_pick(sh, "qzx")
+check("Ctrl-R lists newest first by time, also while you type", buf == "echo q-z-x-new", repr(buf))
+stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(T_NEW)).encode()
+check("Ctrl-R list shows the date and time of each command", stamp in sh.out[start:], stamp.decode())
+sh.keys(b"\x12", 1.5); sh.keys(b"qzx", 1.2); sh.keys(b"\x12", 0.8); sh.keys(b"\r", 0.8)
+buf = sh.buffer()
+check("Ctrl-R in the list sorts by match", buf == "echo qzx-old", repr(buf))
+# Exact-match query for the date of T_NEW: if the time were searched, Enter would insert a command.
+sh.keys(b"\x12", 1.5); sh.keys(b"'" + stamp[:10], 1.2); sh.keys(b"\r", 0.8)
+buf = sh.buffer()
+check("Ctrl-R search looks only at the command, not the time", buf == "", repr(buf))
+
 # 4. Ctrl-Y copies the exact command and does not change the prompt
 sh.keys(b"\x12", 1.5); sh.keys(b"line2-ML", 1.2); sh.keys(b"\x19", 2.0)
 clip = read(CLIP)
@@ -213,6 +236,11 @@ for mode, opts in (("share_history off (Otty per-pane)", "unsetopt share_history
                    ("share_history on", "setopt share_history")):
     setup(); sh = Shell(); sh.cmd(opts)
     sh.cmd("echo own-cmd-111")
+    if mode != "share_history on":
+        # fc -RI gives an old command from another tab the highest event number.
+        other_tab_writes("echo old-other-tab-QQ", int(time.time()) - 3600)
+        buf = ctrl_r_pick(sh, "")
+        check(f"{mode}: old command from other tab is not listed as newest", buf == "echo own-cmd-111", repr(buf))
     other_tab_writes("echo from-other-tab-XYZ")
     if mode == "share_history on":  # zsh imports shared lines when this shell next writes history
         sh.cmd("true")
@@ -225,6 +253,24 @@ for mode, opts in (("share_history off (Otty per-pane)", "unsetopt share_history
     own, other = ((wait_file(f"{W}/dup.out", 10, sh) or "? ?").split() + ["?", "?"])[:2]
     check(f"{mode}: no duplicate history entries", own == "1" and other == "1", f"own={own} other={other}")
     sh.close()
+
+# 7. Speed with a large history. In a subshell on macOS, `fc -l -t` is slow unless TZ is
+# empty (see fzf.zsh): the list would need about 4 s here instead of about 0.2 s.
+setup()
+with open(HIST, "a") as f:
+    t0 = int(time.time()) - 10**7
+    for i in range(20000):
+        f.write(f": {t0 + i * 60}:0;echo speed-{i}\n")
+    f.write(f": {int(time.time()) - 10}:0;echo SPEED-newest\n")
+sh = Shell()
+start = len(sh.out); t = time.time()
+sh.keys(b"\x12", 0)
+while b"SPEED-newest" not in sh.out[start:] and time.time() - t < 20 * SLOW:
+    sh.pump(0.02)
+took = time.time() - t
+check("Ctrl-R list with 20,000 commands shows in less than 2 s", took < 2 * SLOW, f"{took:.2f} s")
+sh.keys(b"\x1b", 0.5)
+sh.close()
 
 shutil.rmtree(W, ignore_errors=True)
 print(f"\n{sum(results)}/{len(results)} passed")

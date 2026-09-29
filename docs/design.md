@@ -46,10 +46,12 @@ zsh-history-substring-search (overlaps with oh-my-zsh's Up-arrow prefix search).
 ## What the file does
 
 1. `source <(fzf --zsh)`: fzf's own Ctrl-R, Ctrl-T, Alt-C and `**` completion.
-2. A wrapper widget on Ctrl-R: `[[ -o share_history ]] || fc -RI`, then fzf's widget.
+2. Its own Ctrl-R widget. It first runs `[[ -o share_history ]] || fc -RI`.
    `fc -RI` reads `$HISTFILE` and adds only the events that are not already in zsh's internal
    history list (zsh manual, `zshbuiltins`, `fc`: "If the -I option is added to -R, only those
    events that are not already contained within the internal history list are added.").
+   Then it does what fzf's `fzf-history-widget` does, with the same fzf options, but it sorts
+   the list by time (see "Sorted by time" below).
 3. `FZF_CTRL_R_OPTS` with a Ctrl-Y binding that copies the selected command.
 4. All of it inside `if (( $+commands[fzf] ))`, so a Mac without fzf starts normally.
 
@@ -62,6 +64,58 @@ zsh-history-substring-search (overlaps with oh-my-zsh's Up-arrow prefix search).
 | fzf trims the spaces at the ends of `{2..}`. zsh keeps them in history. | Copy `{}` (the whole line); `perl` removes the `<number><tab>` prefix. | "Ctrl-Y keeps trailing spaces" |
 | `fc -RI` with `share_history` on adds duplicate entries. | Run `fc -RI` only when `share_history` is off. | "share_history on: no duplicate history entries" |
 | An unguarded `source <(fzf --zsh)` prints `command not found` on a Mac without fzf. | `if (( $+commands[fzf] ))` | "without fzf: no startup errors" |
+| fzf's Ctrl-R sorts by match when you type, and lists by event number. `fc -RI` gives old commands from other tabs new event numbers. | Own widget: sort by time, `--no-sort`. | "Ctrl-R lists newest first by time, also while you type", "old command from other tab is not listed as newest" |
+| The time is in the line, so a query like `2026-09-29` would match every command of that day. | `--delimiter='\t\| │ ' --nth=3..`: search only the command. | "Ctrl-R search looks only at the command, not the time" |
+| On macOS, `fc -l -t` in a subshell is very slow (11 s for 50,000 commands): `localtime()` reads the time zone file on each call. | `export TZ=` in the subshell. | "Ctrl-R list with 20,000 commands shows in less than 2 s" |
+| An exported `FZF_CTRL_R_OPTS` from an older version would keep the old Ctrl-Y pattern. | Set `FZF_CTRL_R_OPTS` each time the file loads. | the Ctrl-Y checks (the test starts zsh with a stale value) |
+
+## Sorted by time
+
+fzf's widget gives fzf `$history` in event order and lets fzf sort by match score when you type.
+That order is not time order:
+
+- `fc -RI` gives commands from other tabs event numbers after the commands of this tab, also
+  when they ran earlier.
+- When you type, the best match comes first, also when it is years old.
+
+The widget in this file makes one line per command, `<event>\t<YYYY-MM-DD HH:MM> │ <command>`:
+
+1. `fc -l -t %s 1` gives the time of each event as a Unix time. `fc -l` prints one line per
+   event (a newline in a command shows as `\n`), so the event number and the time are easy to
+   read. The command text comes from `$history`, which has the exact text.
+2. perl sorts by time, newest first. When two events have the same time, the higher event
+   number comes first, so history without timestamps keeps its event order.
+3. perl keeps only the newest copy of each command (fzf's widget does the same by event number).
+   After each newline of a multi-line command it adds `<tab><16 spaces> │ `, so the next line
+   starts under the command.
+   After the time comes ` │ `, not a tab: the time ends on a tab stop, so a tab would add 8
+   empty columns. The command starts at column 27 (with a tab: 32). A command without a time
+   gets 16 spaces in place of the time.
+4. fzf gets `--no-sort` (Ctrl-R in the list sorts by match), `--delimiter='\t| │ ' --nth=3..` (search only the
+   command, not the time) and fzf's own options (`--scheme=history`, `--multi`, `--wrap-sign`, ...).
+5. On Enter, the event number at the start of each selected line gives the command from `$history`,
+   the same as fzf's widget.
+
+`fc -l` must run in a subshell (`<(export TZ=; fc -l -t '%s' 1)`). In the widget itself zsh
+refuses it ("no interactive history within ZLE"). The subshell is a fork without exec. On macOS,
+`localtime()` in such a child reads the time zone file again for each call: 50,000 commands
+took 11 s. With `TZ` set to an empty value in the child, this does not occur. `TZ=UTC` or a zone
+name is still slow, and `TZ= fc ...` has no effect because `fc` is a builtin, so the file uses
+`export TZ=`. The `%s` output is a Unix time, so `TZ` does not change it (checked: the same
+output as in the main shell, also with `TZ=America/New_York` and `TZ=Asia/Kolkata`). perl
+formats the time in the time zone of your shell.
+
+Cost with 50,000 commands (Apple silicon, zsh 5.9, fzf 0.74.4), until the list is ready:
+this widget 0.42 s, fzf's own widget 0.05 s (it streams to fzf and does not sort).
+For a history of a few thousand commands the difference is not visible.
+
+Ctrl-Y removes `<event><tab><time> │ ` from the start and `<tab><spaces>│ ` after each newline.
+The pattern has no `{16}`: fzf would read `{16}` in a bind as a field placeholder. The file sets `FZF_CTRL_R_OPTS` each
+time it loads, so an exported value from an older version (with the old one-field Ctrl-Y
+pattern) does not stay in new shells. The test starts zsh with such a stale value.
+
+If perl, `zsh/parameter` or fzf's helper functions are missing, the widget falls back to fzf's
+own widget (event order, no time).
 
 With `share_history` on, zsh imports lines from other tabs only when this tab next writes history
 (after you run a command). That is zsh's own timing, and this file does not change it.
@@ -73,8 +127,20 @@ With `share_history` on, zsh imports lines from other tabs only when this tab ne
 and reads the prompt buffer through a helper widget on Ctrl-X Ctrl-D. To act as "another tab", it
 appends a line to the history file while the shell is open.
 
-Control run: with a `fzf.zsh` that has only `source <(fzf --zsh)`, 10 of the 21 checks fail
-(the guard, Ctrl-Y and the other-tab checks).
+The pseudo-terminal is 40 rows by 120 columns: in a 0x0 terminal fzf draws no list lines, and
+the check "Ctrl-R list shows the date and time of each command" reads the screen.
+
+Control runs:
+
+- A `fzf.zsh` that has only `source <(fzf --zsh)`: 9 of the 27 checks fail (the guard, Ctrl-Y,
+  the other-tab checks and the time-order checks).
+- The version before time sorting: 3 of the 27 checks fail ("Ctrl-R lists newest first by time,
+  also while you type", "Ctrl-R list shows the date and time of each command",
+  "old command from other tab is not listed as newest").
+- This version without `export TZ=`: 1 of the 27 checks fails ("Ctrl-R list with 20,000
+  commands shows in less than 2 s": 4.2 s).
+- This version with `--nth=1..` (the time is searched too): 1 of the 27 checks fails
+  ("Ctrl-R search looks only at the command, not the time").
 
 Minimum fzf version: `fzf --zsh` needs 0.48, but marking more than one command in the zsh Ctrl-R list needs
 0.68 (fzf CHANGELOG 0.68.0: "zsh: Handle multi-line history selection (#4595)"). The test
