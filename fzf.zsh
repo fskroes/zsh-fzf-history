@@ -25,7 +25,7 @@ if (( ${+commands[fzf]} )); then
   # header names only Ctrl-Y: fzf's own widget (the fallback below) also reads
   # FZF_CTRL_R_OPTS and has no Ctrl-O. The widget adds Ctrl-O to its header.
   export FZF_CTRL_R_OPTS="
-    --bind 'ctrl-y:execute-silent(printf %s {} | perl -0pe \"s/^[0-9]+\t(?:(?:[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}| {16}) │ )?//; s/\n\t(?: {16} │ )?/\n/g\" | pbcopy)+abort'
+    --bind 'ctrl-y:execute-silent(printf %s {} | perl -0pe \"s/^[^\t]*\t[^\t]*? │ //; s/\n\t *│ /\n/g\" | pbcopy)+abort'
     --color header:italic
     --header 'CTRL-Y: copy to clipboard'"
   source <(fzf --zsh)
