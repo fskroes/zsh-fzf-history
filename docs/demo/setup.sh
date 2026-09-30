@@ -9,24 +9,31 @@ D=${1:?usage: setup.sh DIR}
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 # A tape that ended early can leave the demo tmux server running.
 tmux -L zfh-demo kill-server 2>/dev/null || true
-rm -rf "$D"; mkdir -p "$D/zdot" "$D/bin" "$D/app"
+rm -rf "$D"; mkdir -p "$D/zdot" "$D/bin" "$D/app" "$D/logs"
 
 t=$(( $(date +%s) - 86400 ))
-h() { printf ': %s:0;%s\n' "$t" "$1"; t=$((t + 60)); }
+# h COMMAND [FOLDER]: one history line, and the folder of the command for Ctrl-O
+# (default: the project, ~/app). A newline in the command is "\<newline>" in
+# the history file and a real newline in the folder file.
+h() {
+  printf ': %s:0;%s\n' "$t" "$1"
+  printf '%s\t%s\t%s\0' "$t" "${2:-$D/app}" "${1//\\$'\n'/$'\n'}" >> "$D/hist_dirs"
+  t=$((t + 60))
+}
 {
   h 'docker run --rm -it -p 8080:8080 -e LOG_LEVEL=debug -e DATABASE_URL=postgres://app:app@localhost:5432/app -v "$PWD/config:/etc/app" ghcr.io/example/app:latest'
-  h 'brew upgrade'
+  h 'brew upgrade' "$D"
   h 'git status'
   h 'git pull --rebase'
   h 'docker compose up -d'
   h 'docker compose logs -f api'
-  h 'ssh deploy@staging.example.com'
+  h 'ssh deploy@staging.example.com' "$D"
   h 'git log --oneline -10'
   h 'npm run test -- --watch'
-  h 'kubectl get pods -n web'
+  h 'kubectl get pods -n web' "$D"
   h 'for f in *.log; do\
   gzip "$f"\
-done'
+done' "$D/logs"
   h 'git switch -c fix-login'
   h 'git commit -am "Fix login redirect"'
   h 'git push -u origin HEAD'
@@ -90,9 +97,10 @@ bind -n C-y   set -g @key "Ctrl-Y"        \; send-keys C-y
 bind -n Tab   set -g @key "Tab"           \; send-keys Tab
 bind -n Enter set -g @key "Enter"         \; send-keys Enter
 # VHS cannot type Shift-Tab or Ctrl-/, and its Alt+c sends a plain "c".
-# Ctrl-G sends a real Shift-Tab (BTab), Ctrl-O a real Ctrl-/ (C-_),
+# Ctrl-G sends a real Shift-Tab (BTab), Ctrl-V a real Ctrl-/ (C-_),
 # Ctrl-X a real Left Option+C (M-c, which is ESC c).
 bind -n C-g   set -g @key "Shift-Tab"     \; send-keys BTab
-bind -n C-o   set -g @key "Ctrl-/"        \; send-keys C-_
+bind -n C-o   set -g @key "Ctrl-O"        \; send-keys C-o
+bind -n C-v   set -g @key "Ctrl-/"        \; send-keys C-_
 bind -n C-x   set -g @key "Left Option+C" \; send-keys M-c
 TMUX
