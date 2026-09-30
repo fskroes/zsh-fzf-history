@@ -74,14 +74,14 @@ zsh-history-substring-search (overlaps with oh-my-zsh's Up-arrow prefix search).
 | zsh writes a newline as `\<newline>` and the bytes 0x83 to 0xa2 (in many UTF-8 characters, for example `↳`) as 0x83 + byte XOR 32 in `$HISTFILE`. A plain text compare does not find those lines. | Change the text the same way before the compare. | "folder file: commands with UTF-8 and with a newline are saved" |
 | zsh writes a space after a `\` at the end of a command (also when spaces follow the `\`), so that the line does not continue. Without `extended_history` it writes `\:` for a command that starts with `:` (zsh 5.9, `Src/hist.c`, `savehistfile`). | Change the text the same way before the compare. | "folder file: a command that ends in a backslash is saved", "... without extended_history, a command that starts with ':' or ends in '\' + spaces is saved" |
 | `inc_append_history_time` writes a line after the command ends, not before `preexec`. | The line waits in `_zfh_dirs_wait`; `precmd` saves it (zsh writes the line before `precmd`) with the same check. | "Ctrl-O with inc_append_history_time: ...", "... is saved after it ran", "... other tabs write 4 KB during the command: still saved", "... inc_append_history_time: no leading-space, HISTORY_IGNORE or hook-dropped line" |
-| zsh expands aliases when it reads a function, so an alias such as `rm=trash` made before this file loads would change the cleanup (`trash -f` fails, and the lists with all of `$history` stay). | `setopt no_aliases` before the `if` block of the file (zsh reads that block as one unit), and `aliases` on again after it. | the minimal test config makes aliases for `rm`, `rmdir`, `mktemp` and `perl` before it loads the file; the temp folder and Ctrl-O checks fail without the fix |
+| zsh expands aliases when it reads a function, so an alias such as `rm=trash` made before this file loads would change the cleanup (`trash -f` fails, and the lists with all of `$history` stay). A shell function such as `rm() { trash "$@" }` does the same at run time, because zsh runs a function before a program with the same name. | `setopt no_aliases` before the `if` block of the file (zsh reads that block as one unit), and `aliases` on again after it. The functions call `command rm`, `command rmdir`, `command mktemp` and `command perl`. | the minimal test config makes functions and aliases for `rm`, `rmdir`, `mktemp` and `perl` before it loads the file; the temp folder and Ctrl-O checks fail without the fix |
 | With `share_history` or `inc_append_history`, a line that is not in the file at `preexec` is not written for this command. A waiting line would only make the time window longer: the dropped command itself (or another tab) could write the same text while it runs. | Wait only when `inc_append_history_time` is the only one of the three options that is on. | "folder file: a dropped line is not saved when the same text is written while it runs", "... share_history: a dropped line ..." |
 | fzf-tmux gives fzf only its options and `TERM`, not other environment variables. | The temp path is written into the options (only `[[:alnum:]/._-]`, else `/tmp`). | "FZF_TMUX=1: Ctrl-O lists only this folder and removes its temp folder" (runs in its own `tmux -L` server) |
 | A folder name can hold `)`, `+`, `$(...)` and backticks. In `change-prompt(...)` a `)` in the name would end the action, and the rest would run as fzf actions. | The toggle script prints the name with `printf %s` after `change-prompt:` (the colon form takes the rest of the string as the prompt). | "Ctrl-O: a folder name with fzf actions and $(...) is only text" |
 | `${(D)PWD}` quotes the path after `~` (the zsh manual: "The remainder of the path ... is then quoted"), so the prompt would show `~/My\ Project`. | `${(%):-%~}`: prompt expansion, the same `~` form, not quoted (also with `prompt_subst` and a `%` in the name). | "Ctrl-O: a folder name with fzf actions and $(...) is only text" (checks the prompt text) |
-| fzf's own widget (the fallback when perl or `mktemp` fails) also reads `FZF_CTRL_R_OPTS`, but has no Ctrl-O. | `FZF_CTRL_R_OPTS` names only Ctrl-Y in the header; the widget adds a header with Ctrl-O after it. | "header names Ctrl-O only when Ctrl-O works" |
+| fzf's own widget (the fallback when perl is missing or `mktemp` fails) also reads `FZF_CTRL_R_OPTS`, but has no Ctrl-O. | `FZF_CTRL_R_OPTS` names only Ctrl-Y in the header; the widget adds a header with Ctrl-O after it. | "header names Ctrl-O only when Ctrl-O works" |
 | The temp lists hold all of `$history`. A tab that closes while the list is open would leave them. | `zshexit` hook deletes them (it runs also on SIGHUP while the widget waits). | "tab closed while the Ctrl-R list is open: temp folder removed" |
-| Ctrl-C while perl makes the lists stops the widget before its last line, so the cleanup there does not run. | The widget body is in `{ ... } always { _zfh_tmp_clean }`. | "Ctrl-C while the Ctrl-R list loads: temp folder removed" |
+| A SIGINT while perl makes the lists (for example Ctrl-C before fzf has the terminal) stops the widget before its last line, so the cleanup there does not run. A Ctrl-C after fzf starts goes to fzf as a key: fzf ends, and the widget ends normally when perl is done. | The widget body is in `{ ... } always { _zfh_tmp_clean }`. | "SIGINT while perl makes the lists: temp folder removed" (the test sends SIGINT to the shell and its children), "Ctrl-C while the Ctrl-R list loads: temp folder removed" |
 | `setopt nounset` or `ksh_arrays` in the user's shell. With `ksh_arrays`, `$+commands[fzf]` without braces is an error ("bad output format specification"). | `emulate -L zsh` in the hooks; the widget sets `no_nounset no_ksharrays` as its first line (before its `$+commands[perl]` check); `${+commands[fzf]}` with braces when the file loads. | "folder file: works with setopt nounset", "... ksh_arrays", "Ctrl-R and Ctrl-O work with setopt ksh_arrays"; the minimal test config loads the file with `ksh_arrays nounset` on |
 | A `precmd` hook that fails (for example a prompt theme that reads an unset variable with `nounset`) makes zsh skip the hooks after it. Then the mark stayed from an older prompt, and every line written since then counted as new: a line that a hook drops in one folder was saved if the same text was written earlier in the session. | `preexec` clears the mark (it is good for one command; a waiting line keeps its own copy), so with no new mark nothing is saved. Our `precmd` hook goes first in `precmd_functions`. | "folder file: when a precmd hook before ours fails, an old mark does not count", "... loading the file puts its precmd hook first" |
 | `/work/app` is a prefix of `/work/app-old`. | Match the folder itself or `folder/` + more. | "Ctrl-O: a command from another folder (same name prefix) is not listed" |
@@ -124,12 +124,28 @@ name is still slow, and `TZ= fc ...` has no effect because `fc` is a builtin, so
 output as in the main shell, also with `TZ=America/New_York` and `TZ=Asia/Kolkata`). perl
 formats the time in the time zone of your shell.
 
-Cost with 50,000 commands (Apple silicon, zsh 5.9, fzf 0.74.4), until the list is ready:
-this widget 0.42 s, fzf's own widget 0.05 s (it streams to fzf and does not sort).
-For a history of a few thousand commands the difference is not visible.
+Cost with 50,000 commands (Apple silicon, zsh 5.9, fzf 0.74.4, load 5 to 7), from Ctrl-R until
+the newest line shows, best of 3:
 
-Ctrl-Y removes `<event><tab><time> │ ` from the start and `<tab><spaces>│ ` after each newline.
-The pattern has no `{16}`: fzf would read `{16}` in a bind as a field placeholder. The file sets `FZF_CTRL_R_OPTS` each
+| Widget | Time |
+|---|---|
+| fzf's own widget | 0.59 s |
+| this widget before Ctrl-O | 0.57 s |
+| this widget, empty folder file | 0.57 s |
+| this widget, 50,000 folder lines, all in `$PWD` | 0.75 s |
+
+fzf starts in the same pipeline as perl, so its start-up (about 0.5 s here) and the sort run at
+the same time. A first Ctrl-O version started fzf only after perl had written its files
+(`fzf < all`): 1.04 s with an empty folder file. With a full folder file, perl alone needs
+0.51 s instead of 0.26 s; most of the extra time is the time format (`strftime`) for the second
+list.
+
+Ctrl-Y removes `<event><tab><time> │ ` from the start and `<tab><16 spaces> │ ` after each
+newline. In fzf's own widget (the fallback) a line is `<event><tab><command>` and a newline gets
+only a tab, so the time part of the pattern is optional. The time part matches only this
+widget's exact forms (`\d\d\d\d-\d\d-\d\d \d\d:\d\d` or 16 spaces), so a command with ` │ ` in it
+keeps its text in both formats. The pattern has no `{n}` count: fzf would read `{16}` or `{2}`
+in a bind as a field placeholder, so it uses `\d\d` and 16 real spaces. The file sets `FZF_CTRL_R_OPTS` each
 time it loads, so an exported value from an older version (with the old one-field Ctrl-Y
 pattern) does not stay in new shells. The test starts zsh with such a stale value.
 
@@ -213,7 +229,10 @@ the file saves it itself. I compared:
 **Listing.** perl reads the folder file and keeps, per command text, the
 newest time in `$PWD` or below (`$p eq $here || index($p, "$here/") == 0`). It writes two files to
 a temp folder (`mktemp -d`): `all`, the list from "Sorted by time", and `here`: the lines of `all`
-whose command is in the folder file, with the time in this folder, sorted by that time. So:
+whose command is in the folder file, with the time in this folder, sorted by that time. It
+writes each file as `<name>.tmp` and renames it when it is complete. Then it sends `all` to fzf,
+which runs in the same pipeline (so fzf starts at once; see the cost table in "Sorted by
+time"). So:
 
 - A command that is no longer in `$history` (deleted, or older than `HISTSIZE`) is not in `here`.
   Enter always gets the text from `$history`, the same as in `all`.
@@ -222,7 +241,9 @@ whose command is in the folder file, with the time in this folder, sorted by tha
   command (zsh's own timing, the same as the full list).
 
 **The key.** fzf starts with `all`. `ctrl-o:transform:sh <tmp>/toggle` runs a small
-script. With no `on` file, it saves `$FZF_PROMPT`, creates `on` and prints
+script. If `all` or `here` does not exist yet (perl is not done, and the list is still empty),
+it prints nothing, so Ctrl-O does nothing. When the first line shows, both files are complete.
+With no `on` file, it saves `$FZF_PROMPT`, creates `on` and prints
 `reload(cat <tmp>/here)+change-prompt:<~folder> <prompt>`; with `on`, it goes back.
 The temp path is in the options and the script as it is. An environment variable would be
 simpler, but `fzf-tmux` (`FZF_TMUX=1`) gives fzf only its options, `TERM` and the
@@ -234,15 +255,16 @@ fzf's own widget, the fallback, reads that variable too and has no Ctrl-O.
 
 **Cleanup.** The lists hold all of `$history`. `_zfh_tmp_clean` deletes the known files and
 the folder (`rm -f` on each name, then `rmdir`: no `rm -r` on a path from a variable) when fzf
-exits. The widget body after `mktemp` is in `{ ... } always { _zfh_tmp_clean }`, so Ctrl-C
-while perl or fzf runs also cleans up. A `zshexit` hook runs it too: when the tab closes while the list is
+exits. The widget body after `mktemp` is in `{ ... } always { _zfh_tmp_clean }`, so a SIGINT
+while perl or fzf runs also cleans up (a Ctrl-C key after fzf starts goes to fzf, and the
+widget ends normally). A `zshexit` hook runs it too: when the tab closes while the list is
 open, zsh gets SIGHUP and runs `zshexit` (checked with zsh 5.9).
 
-If perl or `mktemp` fails, the widget falls back to fzf's own widget, the same as when perl is
-missing.
+If `mktemp` fails, or the widget cannot write `here.name` or `toggle`, it falls back to fzf's
+own widget, the same as when perl is missing. If perl fails, the list is empty (the same as in
+the version before Ctrl-O); Esc closes it.
 
-Cost: the folder file is read at each Ctrl-R. With 20,000 commands and 20,000 folder lines the
-list shows in about 0.85 s in the test (the version before Ctrl-O: 0.61 s). The check at each
+Cost: the folder file is read at each Ctrl-R (see the cost table in "Sorted by time"). The check at each
 command reads only the bytes that were added since the prompt, so it does not get slower as
 `$HISTFILE` grows.
 
@@ -283,7 +305,7 @@ first four are from before Ctrl-O (27 checks then); the rest use the 66 checks o
 | The cleanup after fzf | 2: both temp folder checks |
 | The `zshexit` cleanup | 1: "tab closed while the Ctrl-R list is open: temp folder removed" |
 
-A full run takes about 4 minutes (each check waits for real key presses).
+A full run takes about 5 minutes (each check waits for real key presses).
 
 Minimum fzf version: `fzf --zsh` needs 0.48, but marking more than one command in the zsh Ctrl-R list needs
 0.68 (fzf CHANGELOG 0.68.0: "zsh: Handle multi-line history selection (#4595)"). The test

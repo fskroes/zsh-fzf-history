@@ -9,7 +9,9 @@
 # Docs: https://github.com/junegunn/fzf#key-bindings-for-command-line
 
 # zsh expands aliases when it reads a function. Aliases are off while this file
-# is read, so that an alias such as rm=trash does not change the functions.
+# is read, so that an alias such as rm=trash does not change the functions. The
+# functions run rm, rmdir, mktemp and perl with "command", so that a shell
+# function with one of those names is not used either.
 if [[ -o aliases ]]; then _zfh_aliases=1; setopt no_aliases; else _zfh_aliases=0; fi
 if (( ${+commands[fzf]} )); then
   # Ctrl-Y uses printf, not the fzf README's `echo -n`: zsh's echo would turn
@@ -25,7 +27,7 @@ if (( ${+commands[fzf]} )); then
   # header names only Ctrl-Y: fzf's own widget (the fallback below) also reads
   # FZF_CTRL_R_OPTS and has no Ctrl-O. The widget adds Ctrl-O to its header.
   export FZF_CTRL_R_OPTS="
-    --bind 'ctrl-y:execute-silent(printf %s {} | perl -0pe \"s/^[^\t]*\t[^\t]*? │ //; s/\n\t *│ /\n/g\" | pbcopy)+abort'
+    --bind 'ctrl-y:execute-silent(printf %s {} | perl -0pe \"s/^\d+\t(?:(?:\d\d\d\d-\d\d-\d\d \d\d:\d\d|                ) │ )?//; s/\n\t(?:                 │ )?/\n/g\" | pbcopy)+abort'
     --color header:italic
     --header 'CTRL-Y: copy to clipboard'"
   source <(fzf --zsh)
@@ -164,7 +166,12 @@ if (( ${+commands[fzf]} )); then
   # it. perl is a new program, so it formats the time in your own time zone.
   #
   # perl writes two lists to a temp folder: "all" (above) and "here", the
-  # commands that ran in $PWD or a subfolder (from ${HISTFILE}_dirs), sorted by their last time there. fzf starts with "all".
+  # commands that ran in $PWD or a subfolder (from ${HISTFILE}_dirs), sorted
+  # by their last time there. Then it sends "all" to fzf. fzf starts at once, in
+  # the same pipeline, as fzf's own widget does, so its start-up time is not
+  # added to the time of perl. Each file is written as "<name>.tmp" and then
+  # renamed, and perl sends the list only after both are complete. So when the
+  # list shows, Ctrl-O works; a Ctrl-O before that does nothing.
   # Ctrl-O runs the "toggle" script: it reloads the other list and changes the
   # prompt ("~/folder > " for "here"). The temp path is written into the fzf
   # options and the script as it is, with no quotes: fzf-tmux passes only the
@@ -177,7 +184,7 @@ if (( ${+commands[fzf]} )); then
   _zfh_tmp_clean() {
     emulate -L zsh
     [[ -n $_zfh_tmp ]] || return 0
-    command rm -f -- "$_zfh_tmp/all" "$_zfh_tmp/here" "$_zfh_tmp/here.name" "$_zfh_tmp/toggle" "$_zfh_tmp/prompt" "$_zfh_tmp/on"
+    command rm -f -- "$_zfh_tmp/all" "$_zfh_tmp/here" "$_zfh_tmp/all.tmp" "$_zfh_tmp/here.tmp" "$_zfh_tmp/here.name" "$_zfh_tmp/toggle" "$_zfh_tmp/prompt" "$_zfh_tmp/on"
     command rmdir -- "$_zfh_tmp" 2> /dev/null
     _zfh_tmp=
   }
@@ -196,43 +203,14 @@ if (( ${+commands[fzf]} )); then
     [[ $base == [[:alnum:]/._-]## ]] || base=/tmp
     tmp=$(command mktemp -d "${base%/}/zfh.XXXXXX" 2> /dev/null) || { zle fzf-history-widget; return }
     _zfh_tmp=$tmp
-    # "always" also runs after Ctrl-C while perl or fzf runs.
+    # "always" also runs after a SIGINT while perl or fzf runs.
     {
     local opts="--delimiter='\t| │ ' --nth=3.. --no-sort --scheme=history
       --bind=ctrl-r:toggle-sort,alt-r:toggle-raw --wrap-sign '\t↳ ' --highlight-line --multi
       --bind='ctrl-o:transform:sh $tmp/toggle'"
-    if printf '%s\t%s\000' "${(kv)history[@]}" |
-      command perl -e '
-        use POSIX "strftime";
-        my ($fcf, $out, $dirs, $here) = @ARGV;
-        my (%t, @e, %seen, %last, @r);
-        my $pad = " " x 16;
-        open my $fc, "<", $fcf or exit 1;
-        while (<$fc>) { $t{$1} = $2 if /^\s*(\d+)\*?\s+(\d+)\s/ }
-        {
-          local $/ = "\0";
-          while (<STDIN>) { chomp; push @e, [$1, $t{$1} // 0, $2] if /^(\d+)\t(.*)\z/s }
-          if (open my $d, "<", $dirs) { while (<$d>) { chomp; push @r, [split /\t/, $_, 3] } }
-        }
-        my $sub = $here eq "/" ? "/" : "$here/";
-        for (@r) {
-          my ($tm, $p, $c) = @$_;
-          next unless defined $c && $tm =~ /^\d+\z/ && ($p eq $here || index($p, $sub) == 0);
-          $last{$c} = $tm if $tm > ($last{$c} // -1);
-        }
-        my $by_time = sub { $b->[1] <=> $a->[1] || $b->[0] <=> $a->[0] };
-        my @all = grep { !$seen{$_->[2]}++ } sort $by_time @e;
-        my @in = sort $by_time map { [$_->[0], $last{$_->[2]}, $_->[2]] } grep { exists $last{$_->[2]} } @all;
-        for (["all", \@all], ["here", \@in]) {
-          open my $o, ">", "$out/$_->[0]" or exit 1;
-          for (@{$_->[1]}) {
-            (my $c = $_->[2]) =~ s/\n/\n\t$pad │ /g;
-            print $o "$_->[0]\t", ($_->[1] ? strftime("%Y-%m-%d %H:%M", localtime $_->[1]) : $pad), " │ $c\0";
-          }
-          close $o or exit 1;
-        }' <(export TZ=; fc -l -t '%s' 1 2> /dev/null) "$tmp" "${HISTFILE:+${HISTFILE}_dirs}" "$PWD" &&
-      print -rn -- "${(%):-%~}" >| "$tmp/here.name" &&
+    if print -rn -- "${(%):-%~}" >| "$tmp/here.name" &&
       print -r -- "cd $tmp || exit 1
+[ -e all ] && [ -e here ] || exit 0
 if [ -e on ]; then
   rm -f on
   printf 'reload(cat $tmp/all)+change-prompt:%s' \"\$(cat prompt)\"
@@ -241,8 +219,44 @@ else
   printf 'reload(cat $tmp/here)+change-prompt:%s %s' \"\$(cat here.name)\" \"\$FZF_PROMPT\"
 fi" >| "$tmp/toggle"
     then
-      selected="$(FZF_DEFAULT_OPTS=$(__fzf_defaults "" "$opts ${FZF_CTRL_R_OPTS-} --header='CTRL-Y: copy to clipboard, CTRL-O: only this folder' --query=${(qqq)LBUFFER} --read0") \
-        FZF_DEFAULT_OPTS_FILE='' $(__fzfcmd) < "$tmp/all")"
+      selected="$(printf '%s\t%s\000' "${(kv)history[@]}" |
+        command perl -e '
+          use POSIX "strftime";
+          my ($fcf, $out, $dirs, $here) = @ARGV;
+          my (%t, @e, %seen, %last, %txt);
+          my $pad = " " x 16;
+          my $sub = $here eq "/" ? "/" : "$here/";
+          open my $fc, "<", $fcf or exit 1;
+          while (<$fc>) { $t{$1} = $2 if /^\s*(\d+)\*?\s+(\d+)\s/ }
+          {
+            local $/ = "\0";
+            while (<STDIN>) { chomp; push @e, [$1, $t{$1} // 0, $2] if /^(\d+)\t(.*)\z/s }
+            if (open my $d, "<", $dirs) {
+              while (<$d>) {
+                chomp;
+                my ($tm, $p, $c) = split /\t/, $_, 3;
+                next unless defined $c && $tm =~ /^\d+\z/ && ($p eq $here || index($p, $sub) == 0);
+                $last{$c} = $tm if $tm > ($last{$c} // -1);
+              }
+            }
+          }
+          my $by_time = sub { $b->[1] <=> $a->[1] || $b->[0] <=> $a->[0] };
+          my @all = grep { !$seen{$_->[2]}++ } sort $by_time @e;
+          my @in = sort $by_time map { [$_->[0], $last{$_->[2]}, $_->[2]] } grep { exists $last{$_->[2]} } @all;
+          for (["here", \@in], ["all", \@all]) {
+            my ($n, $l) = @$_;
+            $txt{$n} = join "", map {
+              (my $c = $_->[2]) =~ s/\n/\n\t$pad │ /g;
+              "$_->[0]\t" . ($_->[1] ? strftime("%Y-%m-%d %H:%M", localtime $_->[1]) : $pad) . " │ $c\0";
+            } @$l;
+            open my $o, ">", "$out/$n.tmp" or exit 1;
+            print $o $txt{$n};
+            close $o && rename("$out/$n.tmp", "$out/$n") or exit 1;
+          }
+          print $txt{all};
+        ' <(export TZ=; fc -l -t '%s' 1 2> /dev/null) "$tmp" "${HISTFILE:+${HISTFILE}_dirs}" "$PWD" |
+        FZF_DEFAULT_OPTS=$(__fzf_defaults "" "$opts ${FZF_CTRL_R_OPTS-} --header='CTRL-Y: copy to clipboard, CTRL-O: only this folder' --query=${(qqq)LBUFFER} --read0") \
+        FZF_DEFAULT_OPTS_FILE='' $(__fzfcmd))"
       ret=$?
     else
       ret=-1

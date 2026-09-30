@@ -167,8 +167,10 @@ Commands have a real time only with `setopt extended_history` (oh-my-zsh sets it
 zsh gives all lines from `$HISTFILE` the time that the shell read the file, and those lines keep
 their event order.
 
-The time comes from `fc -l -t %s`, and the list is sorted before fzf shows it. With 50,000
-commands in the history this takes about 0.4 s on an Apple silicon Mac (fzf's own Ctrl-R: 0.05 s).
+The time comes from `fc -l -t %s`, and the list is sorted before fzf shows it. fzf starts at
+the same time, so with 50,000 commands the list shows as fast as with fzf's own Ctrl-R (about
+0.6 s on an Apple silicon Mac under load). When all 50,000 also ran in this folder (see
+[Only this folder](#only-this-folder)), it takes about 0.2 s more.
 
 ## Only this folder
 
@@ -250,7 +252,7 @@ Details and the options that I compared are in [docs/design.md](docs/design.md).
 
 The test starts a real interactive zsh in a pseudo-terminal and sends real keys.
 It uses a made-up history file and a fake `pbcopy`, so your history and clipboard are not touched.
-It takes about 4 minutes (each check waits for real key presses).
+It takes about 5 minutes (each check waits for real key presses).
 
 ```sh
 python3 tests/verify.py                    # minimal zsh config + fzf.zsh
