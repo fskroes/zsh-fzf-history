@@ -61,7 +61,9 @@ def setup(no_fzf=False):
     else:
         body = (f"HISTFILE={HIST}; HISTSIZE=30000; SAVEHIST=30000\n"
                 "setopt extended_history inc_append_history\nbindkey -e\n"
-                # Aliases that exist before fzf.zsh loads must not change its functions.
+                # Functions and aliases with these names must not change what fzf.zsh runs
+                # (zsh runs a function before a program with the same name).
+                "function rm rmdir { print -r -- FUNC; }; function mktemp perl { return 1; }\n"
                 "alias rm='echo ALIASED' rmdir='echo ALIASED' mktemp=false perl=false\n"
                 # Options set when the file loads must not break it.
                 f"{hide}setopt ksh_arrays nounset\nsource {FZF_ZSH}\nunsetopt ksh_arrays nounset\n")
@@ -158,11 +160,32 @@ def wait_out(sh, pat, start, timeout):
     return pat in sh.out[start:]
 
 
-def ctrl_r_here(sh, query, toggles=1):
+def lists_ready(sh, tmp_dirs=None, timeout=10):
+    """Pump until a zfh.* temp folder has both lists (then Ctrl-O works). Returns the folder."""
+    global last_ready
+    end = time.time() + timeout * SLOW
+    while True:  # scan at least once, also with timeout=0
+        for d in tmp_dirs or [f"{W}/tmp"]:
+            for n in os.listdir(d) if os.path.isdir(d) else []:
+                z = os.path.join(d, n)
+                if n.startswith("zfh.") and os.path.exists(f"{z}/all") and os.path.exists(f"{z}/here"):
+                    last_ready = z
+                    return z
+        if time.time() >= end:
+            last_ready = None
+            return None
+        sh.pump(0.05)
+
+
+last_ready = None  # the temp folder that the last lists_ready() found
+
+
+def ctrl_r_here(sh, query, toggles=1, tmp_dirs=None):
     """Ctrl-R, Ctrl-O `toggles` times, type query, Enter. Returns the prompt buffer."""
     start = len(sh.out)
     sh.keys(b"\x12", 0.3)
     wait_out(sh, b"CTRL-O: only this folder", start, 10)  # the list is open
+    lists_ready(sh, tmp_dirs)  # fzf starts before perl is done
     sh.pump(0.5)
     for _ in range(toggles):
         sh.keys(b"\x0f", 1.0)
@@ -308,7 +331,8 @@ buf = ctrl_r_here(sh, "ONLY-other", toggles=2)
 check("Ctrl-O again: all commands", buf == "echo ONLY-other", repr(buf))
 # fzf draws the last space of the prompt after a color code.
 check("Ctrl-O: the prompt shows the folder", f"{P} >".encode() in sh.out[start:], f"{P} >")
-sh.keys(b"\x12", 1.5); sh.keys(b"\x0f", 1.0); sh.keys(b"LATER-y", 1.2); sh.keys(b"\x19", 2.0)
+sh.keys(b"\x12", 0.3); lists_ready(sh); sh.pump(0.5)
+sh.keys(b"\x0f", 1.0); sh.keys(b"LATER-y", 1.2); sh.keys(b"\x19", 2.0)
 clip = read(CLIP)
 check("Ctrl-O: Ctrl-Y copies the command", clip == "echo LATER-y", repr(clip))
 sh.buffer()
@@ -406,7 +430,8 @@ check("folder file: nothing is saved without $HISTFILE",
       b"NOHIST-secret" not in after and not os.path.exists(f"{W}/fakehome/.zsh_history_dirs"))
 left = [n for n in os.listdir(f"{W}/tmp") if n.startswith("zfh.")]
 check("Ctrl-R removes its temp folder", not left, repr(left))
-# Ctrl-C while the list loads (a slow perl): the temp folder is removed too.
+# Ctrl-C while the list loads (a slow perl): the temp folder is removed too. The key goes
+# to fzf (it has the terminal); fzf ends and the widget ends normally after perl.
 os.makedirs(f"{W}/slowbin", exist_ok=True)
 with open(f"{W}/slowbin/perl", "w") as f:
     f.write(f"#!/bin/sh\nsleep 1.5\nexec {shutil.which('perl')} \"$@\"\n")
@@ -417,6 +442,15 @@ opened = [n for n in os.listdir(f"{W}/tmp") if n.startswith("zfh.")]
 sh.keys(b"\x03", 2.5)
 left = [n for n in os.listdir(f"{W}/tmp") if n.startswith("zfh.")]
 check("Ctrl-C while the Ctrl-R list loads: temp folder removed", opened and not left, f"open={opened} left={left}")
+# SIGINT to the shell and its children while perl makes the lists: the widget stops before
+# its last line, so only "always" can clean up.
+sh.buffer()
+sh.keys(b"\x12", 0.6)
+opened = [n for n in os.listdir(f"{W}/tmp") if n.startswith("zfh.")]
+os.killpg(os.getpgid(sh.pid), signal.SIGINT); sh.pump(2.5)
+left = [n for n in os.listdir(f"{W}/tmp") if n.startswith("zfh.")]
+check("SIGINT while perl makes the lists: temp folder removed", opened and not left, f"open={opened} left={left}")
+sh.keys(b"\x03", 0.5)
 sh.cmd("path=(${path:#*/slowbin})")
 # The tab closes while the list is open: zshexit deletes the lists (they hold all of $history).
 sh.keys(b"\x12", 1.5)
@@ -478,6 +512,9 @@ check("Ctrl-O: a folder name with fzf actions and $(...) is only text",
       buf == "echo INJ-cmd" and other == "" and prompt and not pwned,
       f"buf={buf!r} other={other!r} prompt={prompt} pwned={pwned}")
 # Fallback (mktemp fails): fzf's own widget has no Ctrl-O, so its header must not name it.
+for c in ["echo 'FB-first", "FB-second'"]:
+    sh.keys(c.encode() + b"\r", 0.5)
+sh.pump(0.5)
 start = len(sh.out)
 sh.keys(b"\x12", 1.5)
 full = b"CTRL-O: only this folder" in sh.out[start:]
@@ -487,7 +524,17 @@ start = len(sh.out)
 sh.keys(b"\x12", 1.5)
 fb = sh.out[start:]
 sh.keys(b"\x1b", 0.8)
-sh.cmd(f"TMPDIR={W}/tmp")
+sh.cmd("unfunction perl")  # the test's perl function empties fzf's own list (it calls plain perl)
+os.path.exists(CLIP) and os.remove(CLIP)
+sh.keys(b"\x12", 1.5); sh.keys(b"SHARE-kept", 1.2); sh.keys(b"\x19", 2.0)
+clip1 = read(CLIP)
+os.path.exists(CLIP) and os.remove(CLIP)
+sh.keys(b"\x12", 1.5); sh.keys(b"FB-first", 1.2); sh.keys(b"\x19", 2.0)
+clip2 = read(CLIP)
+sh.buffer()
+sh.cmd(f"TMPDIR={W}/tmp"); sh.cmd("function perl { return 1; }")
+check("fallback (fzf's own widget): Ctrl-Y copies only the command, also a multi-line one",
+      clip1 == "echo SHARE-kept" and clip2 == "echo 'FB-first\nFB-second'", f"{clip1!r} {clip2!r}")
 check("header names Ctrl-O only when Ctrl-O works",
       full and b"CTRL-Y: copy to clipboard" in fb and b"CTRL-O" not in fb, f"full={full} fallback={b'CTRL-O' in fb}")
 # FZF_TMUX=1: fzf-tmux gives fzf only its options and TERM. Ctrl-O must still work.
@@ -513,6 +560,80 @@ if shutil.which("tmux") and shutil.which("fzf-tmux"):
     os.system("tmux -L zfh-test kill-server 2>/dev/null")
 else:
     print("SKIP  FZF_TMUX=1 check (tmux or fzf-tmux not installed)")
+sh.close()
+
+# 7c. More limits of the folder file, TMPDIR, and Ctrl-O while perl still runs.
+os.remove(f"{W}/ready")
+sh = Shell()
+cd(sh, P)
+sh.cmd("unsetopt share_history; setopt inc_append_history")
+# hist_reduce_blanks: the saved text is the one in $history, so Ctrl-O finds it.
+sh.cmd("setopt hist_reduce_blanks"); sh.cmd("echo   RB-a     b"); sh.cmd("unsetopt hist_reduce_blanks")
+buf = ctrl_r_here(sh, "RB-a")
+data = open(DIRS, "rb").read()
+check("hist_reduce_blanks: the folder file has the short form and Ctrl-O lists it",
+      rec("echo RB-a b") in data and buf == "echo RB-a b", repr(buf))
+# A folder with a tab in its name is not saved (the file uses tabs between the fields).
+TABD = f"{W}/tab\tdir"
+os.makedirs(TABD, exist_ok=True)
+sh.cmd(f"cd $'{W}/tab\\tdir'"); sh.cmd("echo TABDIR-x"); cd(sh, P)
+data = open(DIRS, "rb").read()
+check("folder file: a command in a folder with a tab in its name is not saved", b"TABDIR-x" not in data)
+# The line is not saved when $HISTFILE changes while the command runs. With only
+# inc_append_history_time, zsh writes the line when the command ends, so the command itself
+# can change the file. A second history file keeps the test history as it is.
+H2 = f"{W}/hist2"
+sh.cmd("unsetopt inc_append_history; setopt inc_append_history_time")
+sh.cmd(f"HISTFILE={H2}; echo HF-switch")
+for i in range(4):
+    sh.cmd(f"echo H2-fill-{i}")
+sh.cmd(f"fc -p {W}/hist3; echo FCP-x"); sh.cmd("fc -P")
+sh.cmd("echo INODE-x; cp $HISTFILE $HISTFILE.n && mv -f $HISTFILE.n $HISTFILE")
+sh.cmd("echo SMALL-x; : >| $HISTFILE")
+sh.cmd("echo BIG-x; head -c 4200000 /dev/zero | tr '\\0' '#' >> $HISTFILE; print >> $HISTFILE", 3.0)
+sh.cmd("echo H2-after")
+sh.cmd(f"HISTFILE={HIST}"); sh.cmd("unsetopt inc_append_history_time; setopt inc_append_history")
+d2 = b"".join(open(f, "rb").read() for f in (DIRS, H2 + "_dirs", f"{W}/hist3_dirs") if os.path.exists(f))
+h2 = open(H2 + "_dirs", "rb").read() if os.path.exists(H2 + "_dirs") else b""
+check("folder file: saved again in the new $HISTFILE (the checks below are not always false)",
+      f"\t{P}\techo H2-fill-3\0".encode() in h2 and f"\t{P}\techo H2-after\0".encode() in h2)
+check("folder file: not saved when $HISTFILE names another file at the end of the command",
+      b"HF-switch" not in d2 and b"FCP-x" not in d2)
+check("folder file: not saved when $HISTFILE was replaced during the command (new inode)", b"INODE-x" not in d2)
+check("folder file: not saved when $HISTFILE got smaller during the command", b"SMALL-x" not in d2)
+check("folder file: not saved when more than 4 MB was added during the command", b"BIG-x" not in d2)
+# TMPDIR with a character that the widget does not write into the fzf options: /tmp is used.
+SPC = f"{W}/tmp dir"
+os.makedirs(SPC, exist_ok=True)
+sh.cmd(f"TMPDIR='{SPC}'")
+before = {n for n in os.listdir("/tmp") if n.startswith("zfh.")}
+buf = ctrl_r_here(sh, "RB-a", tmp_dirs=["/tmp"])
+z1 = last_ready
+other = ctrl_r_here(sh, "ONLY-other", tmp_dirs=["/tmp"])  # only in "all": Ctrl-O must hide it
+z2 = last_ready
+sh.cmd(f"TMPDIR={W}/tmp")
+new = {n for n in os.listdir("/tmp") if n.startswith("zfh.")} - before
+in_tmp = all(z and z.startswith("/tmp/zfh.") for z in (z1, z2))
+check("TMPDIR with a space: Ctrl-O works, the temp folder is in /tmp and is removed",
+      in_tmp and buf == "echo RB-a b" and other == "" and not new and not os.listdir(SPC),
+      f"lists={z1},{z2} buf={buf!r} other={other!r} left={sorted(new)}")
+# fzf starts at once, before perl is done. Ctrl-O before the lists are ready does nothing.
+os.makedirs(f"{W}/slowbin", exist_ok=True)
+sh.cmd(f"path=({W}/slowbin $path)")
+start = len(sh.out); t = time.time()
+sh.keys(b"\x12", 0)
+shown = wait_out(sh, b"CTRL-O: only this folder", start, 1.2)
+early = time.time() - t
+zs = [f"{W}/tmp/{n}" for n in os.listdir(f"{W}/tmp") if n.startswith("zfh.")]
+shown = bool(shown and zs) and not any(os.path.exists(f"{z}/all") for z in zs)
+sh.keys(b"\x0f", 0.2)  # perl still sleeps: the lists do not exist yet
+ready = lists_ready(sh, timeout=10)
+sh.pump(0.5); sh.keys(b"ONLY-other", 1.2); sh.keys(b"\r", 0.8)
+buf = sh.buffer()
+sh.cmd("path=(${path:#*/slowbin})")
+check("Ctrl-R: fzf shows before perl is done", shown, f"{early:.2f} s, folders={zs}")
+check("Ctrl-O before the lists are ready does nothing (the full list stays)",
+      bool(ready) and buf == "echo ONLY-other", repr(buf))
 sh.close()
 
 # 8. Speed with a large history. In a subshell on macOS, `fc -l -t` is slow unless TZ is
