@@ -1,5 +1,5 @@
 # Ctrl-R and Ctrl-/ in the Ctrl-R list: sort by match or by time, wrap long lines.
-# VHS cannot type Ctrl-/: Ctrl+O sends a real Ctrl-/ (see setup.sh).
+# VHS cannot type Ctrl-/: Ctrl+V sends a real Ctrl-/ (see setup.sh).
 # Record all demos: bash docs/demo/record.sh   (from the repo root)
 Output docs/demo/list-keys.gif
 Source docs/demo/start.tape
@@ -30,9 +30,9 @@ Ctrl+R
 Sleep 1.2s
 Type "docker run"
 Sleep 1.5s
-Ctrl+O
+Ctrl+V
 Sleep 2.5s
-Ctrl+O
+Ctrl+V
 Sleep 2s
 
 Hide
