@@ -1,5 +1,3 @@
-# Ctrl-O in the Ctrl-R list: only the commands that ran in this folder and its subfolders.
-# Record all demos: bash docs/demo/record.sh   (from the repo root)
 Output docs/demo/ctrl-o.gif
 Source docs/demo/start.tape
 

@@ -1,5 +1,3 @@
-# Ctrl-R: fuzzy history search. Enter puts the command in the prompt.
-# Record all demos: bash docs/demo/record.sh   (from the repo root)
 Output docs/demo/ctrl-r.gif
 Source docs/demo/start.tape
 
@@ -16,7 +14,6 @@ Enter
 Sleep 2.5s
 Ctrl+U
 
-# Text you already typed becomes the search.
 Type "kubectl"
 Sleep 700ms
 Ctrl+R

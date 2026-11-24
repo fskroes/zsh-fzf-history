@@ -1,7 +1,3 @@
-# Record the README demo:  bash docs/demo/record.sh demo   (run from the repo root)
-# Needs vhs, tmux and fzf 0.68+ (brew install vhs tmux fzf).
-# Uses a sandbox from docs/demo/setup.sh: made-up history, fake clipboard.
-
 Output docs/demo/demo.gif
 Require tmux
 Require fzf
@@ -21,7 +17,6 @@ Type " cap 'Ctrl-R: fuzzy search. Enter puts the command in the prompt, it does 
 Sleep 500ms
 Show
 
-# 1. Fuzzy search
 Sleep 300ms
 Ctrl+R
 Sleep 1s
@@ -31,7 +26,6 @@ Enter
 Sleep 2s
 Ctrl+U
 
-# 2. Another open tab
 Hide
 Type " cap 'Ctrl-R sees commands from your other open tabs at once.'" Enter
 Sleep 500ms
@@ -52,7 +46,6 @@ Enter
 Sleep 2.5s
 Ctrl+U
 
-# 3. Ctrl-Y copies the exact command
 Hide
 Type " cap 'Ctrl-Y copies the exact command, also multi-line ones.'" Enter
 Sleep 500ms
@@ -69,7 +62,6 @@ Sleep 500ms
 Enter
 Sleep 2.5s
 
-# 4. Mark more than one (Ctrl+G = Shift-Tab, see setup.sh)
 Hide
 Type " cap 'Shift-Tab marks more than one command. Enter puts all of them in the prompt.'" Enter
 Sleep 500ms

@@ -1,5 +1,3 @@
-# ** then Tab: fzf completion for the command you are typing.
-# Record all demos: bash docs/demo/record.sh   (from the repo root)
 Output docs/demo/star-tab.gif
 Source docs/demo/start.tape
 

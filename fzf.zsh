@@ -1,67 +1,16 @@
-# zsh-fzf-history: fzf Ctrl-R history search for zsh (macOS), tuned.
-# Source this file from ~/.zshrc AFTER oh-my-zsh and your other plugins.
-#
-# Keys: Ctrl-R history, Ctrl-T file picker, Left Option+C (Alt-C) cd into a folder.
-# The Ctrl-R list shows the date and time of each command, newest first, also
-# while you type. In the list: Enter inserts (does not run), Shift-Tab marks more,
-# Ctrl-R sorts by match instead (again: by time), Ctrl-/ toggles line wrap, Ctrl-Y copies,
-# Ctrl-O shows only the commands that ran in this folder and its subfolders (again: all).
-# Docs: https://github.com/junegunn/fzf#key-bindings-for-command-line
-
-# zsh expands aliases when it reads a function. Aliases are off while this file
-# is read, so that an alias such as rm=trash does not change the functions. The
-# functions run rm, rmdir, mktemp and perl with "command", so that a shell
-# function with one of those names is not used either.
 if [[ -o aliases ]]; then _zfh_aliases=1; setopt no_aliases; else _zfh_aliases=0; fi
 if (( ${+commands[fzf]} )); then
-  # Ctrl-Y uses printf, not the fzf README's `echo -n`: zsh's echo would turn
-  # \n and \t inside a command into real newlines/tabs. It copies {} (the whole
-  # line), not {3..}: fzf trims spaces at the ends of {3..}. perl removes the
-  # "<event><tab><time> │ " prefix (see the line format below) and the
-  # "<tab><16 spaces> │ " that the widget adds after each newline of a
-  # multi-line entry. In fzf's own widget (the fallback below) the prefix is
-  # "<event><tab>" and a newline gets only a tab: perl removes those too.
-  # Like Esc, Ctrl-Y leaves
-  # the text you typed in the prompt. This file sets FZF_CTRL_R_OPTS each time
-  # it loads, so an exported value from an older version does not stay. The
-  # header names only Ctrl-Y: fzf's own widget (the fallback below) also reads
-  # FZF_CTRL_R_OPTS and has no Ctrl-O. The widget adds Ctrl-O to its header.
   export FZF_CTRL_R_OPTS="
     --bind 'ctrl-y:execute-silent(printf %s {} | perl -0pe \"s/^\d+\t(?:(?:\d\d\d\d-\d\d-\d\d \d\d:\d\d|                ) │ )?//; s/\n\t(?:                 │ )?/\n/g\" | pbcopy)+abort'
     --color header:italic
     --header 'CTRL-Y: copy to clipboard'"
   source <(fzf --zsh)
 
-  # The folder of each command, for Ctrl-O in the Ctrl-R list. zsh history does
-  # not save the folder, so this file appends "<time>\t<folder>\t<command>\0" to
-  # ${HISTFILE}_dirs (mode 600). The command text comes from $history, so it is
-  # the same text that Ctrl-R lists (also with hist_reduce_blanks).
-  #
-  # Rule: a line goes to the folder file only if zsh wrote it to $HISTFILE for
-  # this command. So a line that zsh keeps out of $HISTFILE does not go there
-  # either: a leading space (also from an alias) with hist_ignore_space, a match
-  # with HISTORY_IGNORE, a zshaddhistory hook that returns 1 or 2, no HISTFILE,
-  # SAVEHIST=0. In preexec such lines still look normal in $history, so the
-  # file itself is the proof. At each prompt, precmd saves the size and inode
-  # of $HISTFILE (_zfh_dirs_mark). _zfh_dirs_saved looks for the line only in
-  # the bytes that were added after that mark, so an older copy of the same
-  # text (from another folder or tab) does not count. If the file was replaced
-  # or became smaller (zsh rewrote it), the line is not saved. preexec clears
-  # the mark, so it is good for one command only: if a precmd hook before ours
-  # fails (zsh then skips the hooks after it), no mark means nothing is saved.
-  # Our precmd hook goes first in precmd_functions for that reason.
-  #
-  # inc_append_history and share_history write the line before preexec, so
-  # preexec saves it at once. inc_append_history_time writes it when the
-  # command ends: the line waits in _zfh_dirs_wait, and precmd saves it.
-  # Without these options zsh writes history only at exit: nothing is saved.
-  # A folder with a tab in its name is not saved.
   if zmodload -F zsh/parameter p:history 2>/dev/null &&
      zmodload -F zsh/datetime p:EPOCHSECONDS 2>/dev/null &&
      zmodload -F zsh/system b:sysopen b:sysread b:sysseek 2>/dev/null &&
      zmodload -F zsh/stat b:zstat 2>/dev/null; then
     typeset -ga _zfh_dirs_wait _zfh_dirs_mark
-    # reply=(<file> <inode> <size>), "-" and 0 if the file does not exist.
     _zfh_dirs_stat() {
       local -A st
       if zstat -H st -- "$HISTFILE" 2>/dev/null; then
@@ -70,12 +19,6 @@ if (( ${+commands[fzf]} )); then
         reply=("$HISTFILE" - 0)
       fi
     }
-    # True if zsh wrote the command $1 to $HISTFILE after the mark $2 $3 $4
-    # (file, inode, size).
-    # In the file a newline is "\<newline>", and zsh writes the bytes 0x83 to
-    # 0xa2 (in many UTF-8 characters, for example "↳") as 0x83 and the byte
-    # XOR 32. 0x83 goes first: no replacement makes a byte in that range.
-    # Without extended_history, a command that starts with ":" gets a "\" first.
     _zfh_dirs_saved() {
       emulate -L zsh -o no_multibyte -o extended_glob
       local -a reply mark=("${(@)argv[2,-1]}")
@@ -85,8 +28,6 @@ if (( ${+commands[fzf]} )); then
       local -i b n=$(( reply[3] - mark[3] ))
       (( n > 0 && n <= 4194304 )) || return 1
       local e=${1//$'\n'/\\$'\n'} buf fd x=
-      # zsh writes a space after a "\" (and the spaces after it) at the end, so
-      # that the line does not continue.
       [[ $e == *\\( )# ]] && e+=' '
       e+=$'\n'
       [[ $1 == :* ]] && x='\'
@@ -97,7 +38,6 @@ if (( ${+commands[fzf]} )); then
       sysseek -u $fd $mark[3] && sysread -i $fd -s $n buf
       exec {fd}<&-
       buf=$'\n'$buf
-      # A full line, with or without extended_history (": <start>:<elapsed>;").
       [[ $buf == *$'\n'(": "<->:<->";"|"$x")"$e"* ]]
     }
     _zfh_dirs_add() {
@@ -115,8 +55,6 @@ if (( ${+commands[fzf]} )); then
       if _zfh_dirs_saved "$cmd" "${(@)mark}"; then
         _zfh_dirs_add $EPOCHSECONDS "$PWD" "$cmd"
       elif [[ -o inc_append_history_time && ! -o inc_append_history && ! -o share_history ]]; then
-        # With the other two options zsh already wrote the line or it will not
-        # write it for this command. The line waits with its mark.
         _zfh_dirs_wait=($EPOCHSECONDS "$PWD" "$cmd" "${(@)mark}")
       fi
     }
@@ -135,51 +73,6 @@ if (( ${+commands[fzf]} )); then
     precmd_functions=(_zfh_dirs_precmd "${precmd_functions[@]:#_zfh_dirs_precmd}")
   fi
 
-  # Ctrl-R widget. It replaces fzf's fzf-history-widget, and uses the same fzf
-  # options, so that the list can be sorted by time. fzf's own widget lists by
-  # event number and, when you type, sorts by match score.
-  #
-  # When share_history is off, this shell's history list does not get the
-  # commands that other open tabs write to $HISTFILE. (The Otty terminal turns
-  # share_history off at the first prompt when its history scope is per-pane.)
-  # So just before the Ctrl-R list opens, fc -RI reads $HISTFILE and adds only
-  # the events that are not already in this shell's history list.
-  # Only when share_history is off: with it on, fc -RI adds duplicate entries.
-  # fc -RI gives the new events higher numbers than the commands of this tab,
-  # also when they are older. That is why the list sorts on time.
-  #
-  # One line per command: "<event>\t<YYYY-MM-DD HH:MM> │ <command>", NUL at the end.
-  # perl gets the time of each event from `fc -l -t %s` (it prints one line per
-  # event: it writes a newline in a command as \n) and the exact command text
-  # from $history. It sorts newest first (same time: higher event first), keeps
-  # only the newest copy of each command, and after each newline of a
-  # multi-line command it adds "<tab><16 spaces> │ ", so that the next line
-  # starts under the command. " │ " and not a tab after the time: the time ends
-  # on a tab stop, so a tab would add 8 empty columns. --nth=3.. searches only
-  # the command.
-  #
-  # zsh does not let a widget run `fc -l` ("no interactive history within ZLE"),
-  # so fc runs in a subshell. On macOS, localtime() in a forked child that
-  # did not exec reads the time zone file again at each call: `fc -l -t` then
-  # takes 11 s instead of 0.15 s for 50,000 commands. With TZ set to empty,
-  # libc reads no zone file. %s is Unix time, so the time zone does not change
-  # it. perl is a new program, so it formats the time in your own time zone.
-  #
-  # perl writes two lists to a temp folder: "all" (above) and "here", the
-  # commands that ran in $PWD or a subfolder (from ${HISTFILE}_dirs), sorted
-  # by their last time there. Then it sends "all" to fzf. fzf starts at once, in
-  # the same pipeline, as fzf's own widget does, so its start-up time is not
-  # added to the time of perl. Each file is written as "<name>.tmp" and then
-  # renamed, and perl sends the list only after both are complete. So when the
-  # list shows, Ctrl-O works; a Ctrl-O before that does nothing.
-  # Ctrl-O runs the "toggle" script: it reloads the other list and changes the
-  # prompt ("~/folder > " for "here"). The temp path is written into the fzf
-  # options and the script as it is, with no quotes: fzf-tmux passes only the
-  # options to fzf, not other environment variables. So the path may only have
-  # letters, digits and "/._-"; if $TMPDIR has other characters, /tmp is used.
-  # The lists hold all of $history, so _zfh_tmp_clean deletes them when fzf
-  # exits, and also at shell exit (zshexit runs also when the tab closes while
-  # the list is open).
   typeset -g _zfh_tmp
   _zfh_tmp_clean() {
     emulate -L zsh
@@ -203,7 +96,6 @@ if (( ${+commands[fzf]} )); then
     [[ $base == [[:alnum:]/._-]## ]] || base=/tmp
     tmp=$(command mktemp -d "${base%/}/zfh.XXXXXX" 2> /dev/null) || { zle fzf-history-widget; return }
     _zfh_tmp=$tmp
-    # "always" also runs after a SIGINT while perl or fzf runs.
     {
     local opts="--delimiter='\t| │ ' --nth=3.. --no-sort --scheme=history
       --bind=ctrl-r:toggle-sort,alt-r:toggle-raw --wrap-sign '\t↳ ' --highlight-line --multi
@@ -268,8 +160,6 @@ fi" >| "$tmp/toggle"
     fi
     if [[ -n $selected ]]; then
       if [[ $selected == <->$'\t'* ]]; then
-        # Continuation lines of a multi-line command start with a tab, so only
-        # the first line of each selected command matches.
         for line in ${(ps:\n:)selected}; do
           if [[ $line == (#b)(<->)(#B)$'\t'* ]]; then
             (( ${+history[${match[1]}]} )) && cmds+=("${history[${match[1]}]}")

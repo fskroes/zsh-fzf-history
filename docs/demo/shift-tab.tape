@@ -1,6 +1,3 @@
-# Shift-Tab in the Ctrl-R list: mark more than one command.
-# VHS cannot type Shift-Tab: Ctrl+G sends a real Shift-Tab (see setup.sh).
-# Record all demos: bash docs/demo/record.sh   (from the repo root)
 Output docs/demo/shift-tab.gif
 Source docs/demo/start.tape
 
