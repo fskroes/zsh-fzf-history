@@ -1,6 +1,3 @@
-# Left Option+C (Alt-C): cd into a folder.
-# VHS Alt+c sends a plain "c": Ctrl+X sends a real Option+C (see setup.sh).
-# Record all demos: bash docs/demo/record.sh   (from the repo root)
 Output docs/demo/option-c.gif
 Source docs/demo/start.tape
 

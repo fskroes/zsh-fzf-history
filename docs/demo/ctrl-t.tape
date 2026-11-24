@@ -1,5 +1,3 @@
-# Ctrl-T: pick files, their paths go in the prompt.
-# Record all demos: bash docs/demo/record.sh   (from the repo root)
 Output docs/demo/ctrl-t.gif
 Source docs/demo/start.tape
 

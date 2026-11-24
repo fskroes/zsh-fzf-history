@@ -1,5 +1,3 @@
-# Shared start for the one-key tapes. They load it with Source; it records nothing itself.
-# Opens the sandbox from setup.sh in one tmux pane, hidden.
 Require tmux
 Require fzf
 

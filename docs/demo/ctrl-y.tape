@@ -1,5 +1,3 @@
-# Ctrl-Y in the Ctrl-R list: copy the exact command. pbpaste shows the copy.
-# Record all demos: bash docs/demo/record.sh   (from the repo root)
 Output docs/demo/ctrl-y.gif
 Source docs/demo/start.tape
 

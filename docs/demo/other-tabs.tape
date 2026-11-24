@@ -1,5 +1,3 @@
-# Ctrl-R sees a command from another open tab at once. Two tmux panes = two tabs.
-# Record all demos: bash docs/demo/record.sh   (from the repo root)
 Output docs/demo/other-tabs.gif
 Require tmux
 Require fzf

@@ -1,20 +1,11 @@
 #!/usr/bin/env bash
-# Build the sandbox that the tapes in docs/demo/ record: a made-up history,
-# a made-up project folder, a fake pbcopy/pbpaste and a minimal zsh config
-# that sources ../../fzf.zsh. Your own history, clipboard, files and ~/.zshrc
-# are not used.
-# Usage: bash docs/demo/setup.sh DIR
 set -euo pipefail
 D=${1:?usage: setup.sh DIR}
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-# A tape that ended early can leave the demo tmux server running.
 tmux -L zfh-demo kill-server 2>/dev/null || true
 rm -rf "$D"; mkdir -p "$D/zdot" "$D/bin" "$D/app" "$D/logs"
 
 t=$(( $(date +%s) - 86400 ))
-# h COMMAND [FOLDER]: one history line, and the folder of the command for Ctrl-O
-# (default: the project, ~/app). A newline in the command is "\<newline>" in
-# the history file and a real newline in the folder file.
 h() {
   printf ': %s:0;%s\n' "$t" "$1"
   printf '%s\t%s\t%s\0' "$t" "${2:-$D/app}" "${1//\\$'\n'/$'\n'}" >> "$D/hist_dirs"
@@ -40,7 +31,6 @@ done' "$D/logs"
   h 'curl -s localhost:8080/health | jq .'
 } > "$D/hist"
 
-# Made-up project for Ctrl-T, Left Option+C and ** completion.
 for f in README.md package.json docker-compose.yml \
          src/auth/login.ts src/auth/session.ts src/api/health.ts src/api/users.ts \
          src/components/Button.tsx src/components/Header.tsx src/components/LoginForm.tsx \
@@ -49,7 +39,6 @@ for f in README.md package.json docker-compose.yml \
   mkdir -p "$D/app/$(dirname "$f")"; : > "$D/app/$f"
 done
 
-# Fake clipboard: the demo shows the copy without touching the real one.
 printf '#!/bin/sh\ncat > "%s/clip"\n' "$D" > "$D/bin/pbcopy"
 printf '#!/bin/sh\ncat "%s/clip"\n'   "$D" > "$D/bin/pbpaste"
 chmod +x "$D/bin/pbcopy" "$D/bin/pbpaste"
